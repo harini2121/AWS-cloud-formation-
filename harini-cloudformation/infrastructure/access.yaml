@@ -1,0 +1,32 @@
+Description: >
+    Define AccessKeyId and Secret
+
+Resources:
+    myuser:
+      Type: AWS::IAM::User
+      Properties:
+        Path: "/"
+        LoginProfile:
+          Password: myP@ssW0rd
+        Policies:
+        - PolicyName: giveaccesstoDB
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - "dynamodb:*"
+              Resource: "*"
+
+    myaccesskey:
+        Type: AWS::IAM::AccessKey
+        Properties:
+            UserName: !Ref myuser
+
+Outputs:
+    AccessKeyformyaccesskey:
+        Description: A reference to AccessKeyformyaccesskey
+        Value: !Ref myaccesskey
+    SecretKeyformyaccesskey:
+        Description: A reference to SecretKeyformyaccesskey
+        Value: !GetAtt myaccesskey.SecretAccessKey

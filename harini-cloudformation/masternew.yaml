@@ -1,0 +1,122 @@
+Description: >
+
+  This template deploys a VPC, with a pair of public and private subnets spread 
+  across two Availabilty Zones. It deploys an Internet Gateway, with a default 
+  route on the public subnets. It deploys a pair of NAT Gateways (one in each AZ), 
+  and default routes for them in the private subnets.
+
+  It then deploys a highly available ECS cluster using an AutoScaling Group, with 
+  ECS hosts distributed across multiple Availability Zones. 
+
+  Finally, it deploys a pair of example ECS services from containers published in 
+  Amazon EC2 Container Registry (Amazon ECR).
+
+  Last Modified: 28th December 2018
+  Author: Harini Prasadi <harini.2018196@iit.ac.lk>
+
+Resources:
+  VPC:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.ap-south-1.amazonaws.com/hariniecs/harini-cloudformation/infrastructure/vpc.yaml
+      Parameters:
+        EnvironmentName: !Ref AWS::StackName
+        VpcCIDR: 10.180.0.0/16
+        PublicSubnet1CIDR: 10.180.8.0/21
+        PublicSubnet2CIDR: 10.180.16.0/21
+        PrivateSubnet1CIDR: 10.180.24.0/21
+        PrivateSubnet2CIDR: 10.180.32.0/21
+
+  SecurityGroups:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.ap-south-1.amazonaws.com/hariniecs/harini-cloudformation/infrastructure/security-groups.yaml
+      Parameters:
+        EnvironmentName: !Ref AWS::StackName
+        VPC: !GetAtt VPC.Outputs.VPC
+
+  ALB:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.ap-south-1.amazonaws.com/hariniecs/harini-cloudformation/infrastructure/load-balancers.yaml
+      Parameters:
+        EnvironmentName: !Ref AWS::StackName
+        VPC: !GetAtt VPC.Outputs.VPC
+        Subnets: !GetAtt VPC.Outputs.PublicSubnets
+        SecurityGroup: !GetAtt SecurityGroups.Outputs.LoadBalancerSecurityGroup
+
+  ECS:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.ap-south-1.amazonaws.com/hariniecs/harini-cloudformation/infrastructure/ecs-cluster.yaml
+      Parameters:
+        EnvironmentName: !Ref AWS::StackName
+        InstanceType: t2.micro
+        ClusterSize: 4
+        VPC: !GetAtt VPC.Outputs.VPC
+        SecurityGroup: !GetAtt SecurityGroups.Outputs.ECSHostSecurityGroup
+        Subnets: !GetAtt VPC.Outputs.PrivateSubnets
+
+  AccessKeys:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:  https://s3.ap-south-1.amazonaws.com/hariniecs/harini-cloudformation/infrastructure/access.yaml
+
+  FlowersDynamoDBTable:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.ap-south-1.amazonaws.com/hariniecs/harini-cloudformation/infrastructure/dynamo-db.yaml
+      Parameters:
+        HashKeyElementName: "code"
+        SortKeyElementName: "name"
+        Attr1Name: "code"
+        Attr1Type: N
+        Attr2Name: "name"
+        Attr2Type: S
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  FlowersService:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.ap-south-1.amazonaws.com/hariniecs/harini-cloudformation/services/flower-service.yaml
+      Parameters:
+        VPC: !GetAtt VPC.Outputs.VPC
+        Cluster: !GetAtt ECS.Outputs.Cluster
+        DesiredCount: 1
+        Listener: !GetAtt ALB.Outputs.Listener
+        Path: /flowersAPI*
+        ECSServiceAutoScalingRoleARN: !GetAtt ECS.Outputs.ECSServiceAutoScalingRole
+        AccessKey: !GetAtt AccessKeys.Outputs.AccessKeyformyaccesskey
+        AccessSecret: !GetAtt AccessKeys.Outputs.SecretKeyformyaccesskey
+        Region: !Sub ${AWS::Region}
+        TableName: Flowers
+
+  AddService:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.ap-south-1.amazonaws.com/hariniecs/harini-cloudformation/services/add-service.yaml
+      Parameters:
+        VPC: !GetAtt VPC.Outputs.VPC
+        Cluster: !GetAtt ECS.Outputs.Cluster
+        DesiredCount: 1
+        Listener: !GetAtt ALB.Outputs.Listener
+        Path: /add*
+        ECSServiceAutoScalingRoleARN: !GetAtt ECS.Outputs.ECSServiceAutoScalingRole
+
+  LifecycleHook:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.ap-south-1.amazonaws.com/hariniecs/harini-cloudformation/infrastructure/lifecyclehook.yaml
+      Parameters:
+        Cluster: !GetAtt ECS.Outputs.Cluster
+        ECSAutoScalingGroupName: !GetAtt ECS.Outputs.ECSAutoScalingGroupName
+
+Outputs:
+  AddServiceUrl:
+    Description: The URL endpoint for the product service
+    Value: !Join ["/", [!GetAtt ALB.Outputs.LoadBalancerUrl, "add"]]
+
+  FlowersServiceUrl:
+    Description: The URL endpoint for the website service
+    Value: !Join ["/", [!GetAtt ALB.Outputs.LoadBalancerUrl, "flowersAPI"]]
